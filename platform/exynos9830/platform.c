@@ -79,6 +79,16 @@ unsigned int secure_os_loaded = 0;
 
 volatile char *bootloader_cmdline;
 
+// Node, compatible, reg
+volatile char *bootloader_reserved_regions[][3] = {
+	{"kaslr", "Node not found", "Unknown reg value"},
+	{"el2_earlymem", "Node not found", "Unknown reg value"},
+	{"el2_code", "Node not found", "Unknown reg value"},
+};
+
+volatile int bootloader_reserved_region_count = sizeof(bootloader_reserved_regions) /
+										sizeof(bootloader_reserved_regions[0]);
+
 #ifdef CONFIG_GET_B_REV_FROM_ADC
 int get_board_rev_adc(int *sh)
 {
@@ -126,26 +136,62 @@ int get_board_rev_gpio(void)
 
 void get_bootloader_cmdline(void)
 {
-        int offset;
-        int len, ret = 0;
+	int offset;
+	int len, ret = 0;
 
-        u32 bootloader_fdt_location = readl(FDT_POINTER_ADDRESS);
-        void *bootloader_fdt = (void *)bootloader_fdt_location;
+	u32 bootloader_fdt_location = readl(FDT_POINTER_ADDRESS);
+	void *bootloader_fdt = (void *)bootloader_fdt_location;
 
-        ret = fdt_check_header(bootloader_fdt);
-        if (ret) {
-                printf("libfdt fdt_check_header(): %s\n", fdt_strerror(ret));
-        }
+	ret = fdt_check_header(bootloader_fdt);
+	if (ret) {
+		printf("libfdt fdt_check_header(): %s\n", fdt_strerror(ret));
+	}
 
-        offset = fdt_path_offset(bootloader_fdt, "/chosen");
-        if (offset < 0) {
-                printf("libfdt fdt_path_offset(): %s\n", fdt_strerror(offset));
-        }
+	offset = fdt_path_offset(bootloader_fdt, "/chosen");
+	if (offset < 0) {
+		printf("libfdt fdt_path_offset(): %s\n", fdt_strerror(offset));
+	}
 
-        bootloader_cmdline = fdt_getprop(bootloader_fdt, offset, "bootargs", &len);
-        if (len <= 0) {
-                printf("libfdt fdt_getprop(): %s\n", fdt_strerror(len));
-        }
+	bootloader_cmdline = fdt_getprop(bootloader_fdt, offset, "bootargs", &len);
+	if (len <= 0) {
+		printf("libfdt fdt_getprop(): %s\n", fdt_strerror(len));
+	}
+}
+
+void get_bootloader_reserved_memory(void)
+{
+	int offset;
+	int len, ret = 0;
+
+	u32 bootloader_fdt_location = readl(FDT_POINTER_ADDRESS);
+	void *bootloader_fdt = (void *)bootloader_fdt_location;
+
+	for (int i = 0; i < bootloader_reserved_region_count; i++)
+	{
+		const char *path;
+
+		sprintf(path, "/reserved-memory/%s", bootloader_reserved_regions[i][0]);
+
+		ret = fdt_check_header(bootloader_fdt);
+		if (ret) {
+			printf("libfdt fdt_check_header(): %s\n", fdt_strerror(ret));
+		}
+
+		offset = fdt_path_offset(bootloader_fdt, path);
+		if (offset < 0) {
+			printf("libfdt fdt_path_offset(): %s\n", fdt_strerror(offset));
+		}
+
+		bootloader_reserved_regions[i][1] = fdt_getprop(bootloader_fdt, offset, "compatible", &len);
+		if (len <= 0) {
+			printf("libfdt fdt_getprop(): %s\n", fdt_strerror(len));
+		}
+
+		bootloader_reserved_regions[i][2] = fdt_getprop(bootloader_fdt, offset, "reg", &len);
+		if (len <= 0) {
+			printf("libfdt fdt_getprop(): %s\n", fdt_strerror(len));
+		}
+	}
 }
 
 void get_board_rev(void)
@@ -420,6 +466,7 @@ void platform_init(void)
 
 	display_rst_stat(rst_stat);
 	get_bootloader_cmdline();
+	get_bootloader_reserved_memory();
 	get_board_rev();
 	pmic_init();
 	display_pmic_info();
@@ -432,6 +479,18 @@ void platform_init(void)
 	s2mu106_charger_init();
 	fg_init_s2mu106();
 #endif
+
+	*(int*)(0x19050070) = 0x1281;
+	print_lcd_update(FONT_GREEN, FONT_BLACK, "");
+        print_lcd_update(FONT_GREEN, FONT_BLACK, "");
+        print_lcd_update(FONT_GREEN, FONT_BLACK, "");
+	for(int i = 0; i < bootloader_reserved_region_count; i++){
+		print_lcd_update(FONT_GREEN, FONT_BLACK, "Node: %s", bootloader_reserved_regions[i][0]);
+                print_lcd_update(FONT_GREEN, FONT_BLACK, "Compat: %s", bootloader_reserved_regions[i][1]);
+                print_lcd_update(FONT_GREEN, FONT_BLACK, "Reg: %s", bootloader_reserved_regions[i][2]);
+	}
+
+	while(1);
 
 	/*
 	 * check_charger_connect();
